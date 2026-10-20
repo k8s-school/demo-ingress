@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# See https://kubernetes.github.io/ingress-nginx/deploy/#quick-start
-# and https://kubernetes.io/docs/tasks/access-application-cluster/ingress-minikube/
+# Ingress demo on OpenShift: no ingress controller to install, the ingress-to-route
+# controller turns each Ingress into a Route served by the HAProxy router
+# See the OpenShift documentation: Networking > Configuring routes > Creating a route through an Ingress object
 set -euxo pipefail
 
 DIR=$(cd "$(dirname "$0")"; pwd -P)
@@ -23,4 +24,5 @@ kubectl apply -n "$NSAPP" -f $DIR/example-ingress-openshift.yaml
 kubectl get -n "$NSAPP" ingress
 kubectl get -n "$NSAPP" route
 
-curl -k https://hello-world.apps-crc.testing
+# The router needs a few seconds to load the new Route
+curl -sS --fail -k --retry 10 --retry-all-errors --retry-delay 2 https://hello-world.apps-crc.testing

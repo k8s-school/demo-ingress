@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# See https://kubernetes.github.io/ingress-nginx/deploy/#quick-start
-# and https://kubernetes.io/docs/tasks/access-application-cluster/ingress-minikube/
+# Ingress demo with the Traefik ingress controller
+# See https://doc.traefik.io/traefik/getting-started/install-traefik/
+# and https://kubernetes.io/docs/concepts/services-networking/ingress/
 set -euxo pipefail
 
 DIR=$(cd "$(dirname "$0")"; pwd -P)
@@ -44,28 +45,28 @@ NODE1_IP=$(kubectl get nodes --selector="! node-role.kubernetes.io/master" \
 
 # Run on kubeadm cluster
 # see "kubernetes in action" p391
-kubectl delete ns -l "ingress=nginx"
+kubectl delete ns -l "demo=ingress"
 kubectl create namespace "$ingress_ns"
 kubectl create namespace "$NSAPP"
-kubectl label ns "$ingress_ns" "ingress=nginx"
-kubectl label ns "$NSAPP" "ingress=nginx"
+kubectl label ns "$ingress_ns" "demo=ingress"
+kubectl label ns "$NSAPP" "demo=ingress"
 
-ink "Install nginx-controller"
-helm upgrade --install ingress-nginx ingress-nginx \
-  --repo https://kubernetes.github.io/ingress-nginx \
-  --namespace "$ingress_ns" --create-namespace
+ink "Install Traefik ingress controller, exposed via NodePort (no cloud LoadBalancer on this cluster)"
+helm upgrade --install traefik traefik \
+  --repo https://traefik.github.io/charts --version "$traefik_chart_version" \
+  --namespace "$ingress_ns" \
+  --set service.type=NodePort
 
 ink "Deploy application"
 kubectl create deployment web -n "$NSAPP" --image=gcr.io/google-samples/hello-app:1.0
 kubectl expose deployment web -n "$NSAPP" --port=8080
 kubectl  wait -n "$NSAPP" --for=condition=available deployment web
 
-ink "Wait for nginx-controller to be up and running (alternatively, use helm --wait)"
-kubectl wait --for=condition=available deployment -n "$ingress_ns" -l app.kubernetes.io/instance=ingress-nginx
+ink "Wait for Traefik to be up and running (alternatively, use helm --wait)"
+kubectl wait --for=condition=available deployment -n "$ingress_ns" -l app.kubernetes.io/instance=traefik-"$ingress_ns"
+kubectl get ingressclass
 
-TMP_STR="$NODE1_IP hello-world.info"
-echo "INFO: Add '$TMP_STR' to /etc/hosts"
-sudo sh -c "echo '$TMP_STR' >> /etc/hosts"
+echo "INFO: to access the application by name, add '$NODE1_IP hello-world.info' to /etc/hosts"
 
 if [ "$INGRESS_FULL" = false ]
 then
@@ -85,21 +86,16 @@ kubectl apply -n "$NSAPP" -f $DIR/example-ingress.yaml
 kubectl get -n "$NSAPP" ingress
 
 ink "Access the application"
-NODE_PORT=$(kubectl get svc ingress-nginx-controller -n "$ingress_ns"  -o jsonpath="{.spec.ports[0].nodePort}")
-
-helm upgrade --wait --install ingress-nginx ingress-nginx \
-  --repo https://kubernetes.github.io/ingress-nginx \
-  --namespace "$ingress_ns" --create-namespace \
-  --set controller.service.type=NodePort
-
-
-HTTPS_NODE_PORT=$(kubectl get svc ingress-nginx-controller -n "$ingress_ns"  -o jsonpath="{.spec.ports[1].nodePort}")
+# Match by .port, the entrypoint ports exposed by the chart (80/443)
+NODE_PORT=$(kubectl get svc traefik -n "$ingress_ns" -o jsonpath='{.spec.ports[?(@.port==80)].nodePort}')
+HTTPS_NODE_PORT=$(kubectl get svc traefik -n "$ingress_ns" -o jsonpath='{.spec.ports[?(@.port==443)].nodePort}')
 
 echo "INFO: access the application via ingress"
 echo "HTTP:  curl hello-world.info:$NODE_PORT"
 echo "HTTPS: curl -k https://hello-world.info:$HTTPS_NODE_PORT"
 echo ""
-curl hello-world.info:$NODE_PORT
+# --resolve avoids depending on /etc/hosts
+curl -sS --fail --resolve "hello-world.info:$NODE_PORT:$NODE1_IP" hello-world.info:$NODE_PORT
 echo ""
 echo "Testing HTTPS endpoint (ignoring self-signed certificate):"
-curl -k https://hello-world.info:$HTTPS_NODE_PORT
+curl -sS --fail -k --resolve "hello-world.info:$HTTPS_NODE_PORT:$NODE1_IP" https://hello-world.info:$HTTPS_NODE_PORT

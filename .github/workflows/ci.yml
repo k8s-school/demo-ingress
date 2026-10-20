@@ -1,4 +1,4 @@
-# Qserv operator CI workflow
+# Ingress demo CI workflow
 ---
 name: "CI"
 on:
@@ -8,7 +8,7 @@ on:
       - master
 jobs:
   main:
-    name: Run nginx-controller demo
+    name: Run ingress demo
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
@@ -32,6 +32,6 @@ jobs:
         run: |
           kubectl get nodes
           kubectl get pods -n kube-system
-      - name: Run test on nginx-controller
+      - name: Run test on ingress demo
         run: |
           ./setup.sh -s
